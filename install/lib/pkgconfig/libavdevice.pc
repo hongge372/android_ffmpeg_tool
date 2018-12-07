@@ -1,0 +1,14 @@
+prefix=install
+exec_prefix=${prefix}
+libdir=install/lib
+includedir=install/include
+
+Name: libavdevice
+Description: FFmpeg device handling library
+Version: 58.4.101
+Requires: libavfilter >= 7.25.100, libswscale >= 5.2.100, libpostproc >= 55.2.100, libswresample >= 3.2.100, libavformat >= 58.17.101, libavcodec >= 58.21.104, libavutil >= 56.18.102
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavdevice -lm -lasound -lsndio -lxcb -lxcb-shape -lxcb -lxcb-xfixes -lxcb-render -lxcb-shape -lxcb
+Libs.private: 
+Cflags: -I${includedir}

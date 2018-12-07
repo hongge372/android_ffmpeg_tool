@@ -1,0 +1,14 @@
+prefix=install
+exec_prefix=${prefix}
+libdir=install/lib
+includedir=install/include
+
+Name: libavformat
+Description: FFmpeg container format library
+Version: 58.17.101
+Requires: libavcodec >= 58.21.104, libavutil >= 56.18.102
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavformat -lm -lz
+Libs.private: 
+Cflags: -I${includedir}
