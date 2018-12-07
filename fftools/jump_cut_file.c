@@ -105,6 +105,8 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
     pice_save.video_out = 0;
     pice_save.audio_out = 0;
     char *qc_stream_type;
+
+    float shift_remove=0;
     
     memset(&pkt, 0, sizeof(AVPacket));
 #if 1
@@ -190,12 +192,17 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
             if(!pice_save.first_write_flg){
                 pice_save.para_start_pts = pkt.pts;
                 pice_save.first_write_flg = 1;
+            }            
+            if( pice_save.last_para_pts ){
+                shift_remove = v_persentation_ms /(1000 * pice_save.chg_rate);
+                pkt.dts = pkt.pts = pkt.pts - pice_save.para_start_pts + pice_save.last_para_pts + shift_remove;
+            }else{
+                pkt.dts = pkt.pts = pkt.pts - pice_save.para_start_pts + pice_save.last_para_pts;
             }
-            
-            pkt.dts = pkt.pts = pkt.pts - pice_save.para_start_pts + pice_save.last_para_pts + v_persentation_ms /(1000 * pice_save.chg_rate);
             if(pkt.stream_index == AVMEDIA_TYPE_VIDEO){
                 *last_pice_para_pts = pice_save.end_pts = pkt.dts;
             }
+            *last_pice_para_pts = pice_save.end_pts = pkt.dts;
             av_log(NULL, AV_LOG_ERROR, "OOOOOO dump pts data pkt.pts:=%"PRId64" pice_save.para_start_pts:=%"PRId64" pice_save.end_pts:= %"PRId64" *last_pice_para_pts:=%"PRId64 " <------!!!!!!!!!!!!\n",
                    pkt.pts , pice_save.para_start_pts, pice_save.end_pts, *last_pice_para_pts);
             ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
@@ -228,15 +235,15 @@ static int demuxing_cut(char *in_filename, char *out_filename)
     float a_persentation_ms = 0.0f;
     float v_persentation_ms = 0;
 
-#if 0
+#if 1
 #define ARRAY_SIZE 4
     long int time_array[ARRAY_SIZE]={
-        300, 400, 20000, 22000,
+        0, 300, 20000, 22000,
     };
 #else
 #define ARRAY_SIZE 2
     long int time_array[ARRAY_SIZE]={
-        300, 600
+        0, 300
     };
 #endif
     if ((ret = avformat_open_input(&ifmt_ctx, in_filename, 0, 0)) < 0) {
