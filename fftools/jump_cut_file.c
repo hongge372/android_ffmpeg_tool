@@ -77,6 +77,7 @@ static int open_codec_context(int *stream_idx,
 static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormatContext *ofmt_ctx, AVOutputFormat *ofmt,
                           long pice_start_time, long pice_end_time, int64_t *last_pice_para_pts,
                           float v_persentation_ms, float a_persentation_ms,
+                          float v_time_base, float a_time_base,
                           int *stream_mapping,
                           int stream_mapping_size)
 {
@@ -96,7 +97,8 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
         //watch info
     pice_save.chg_rate = 0;
     pice_save.first_write_flg = 0;
-    pice_save.para_start_pts = 0;
+    pice_save.para_v_start_pts = 0;
+    pice_save.para_a_start_pts = 0;
     pice_save.para_write_flg = 0;
     pice_save.end_pts = 0; 
     
@@ -190,21 +192,21 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
            pts_ms_time >= pice_save.start_time &&
            pts_ms_time < pice_save.end_time){
             if(!pice_save.first_write_flg){
-                pice_save.para_start_pts = pkt.pts;
+                pice_save.para_v_start_pts = pkt.pts;
                 pice_save.first_write_flg = 1;
             }            
             if( pice_save.last_para_pts ){
                 shift_remove = v_persentation_ms /(1000 * pice_save.chg_rate);
-                pkt.dts = pkt.pts = pkt.pts - pice_save.para_start_pts + pice_save.last_para_pts + shift_remove;
+                pkt.dts = pkt.pts = pkt.pts - pice_save.para_v_start_pts + pice_save.last_para_pts + shift_remove;
             }else{
-                pkt.dts = pkt.pts = pkt.pts - pice_save.para_start_pts + pice_save.last_para_pts;
+                pkt.dts = pkt.pts = pkt.pts - pice_save.para_v_start_pts + pice_save.last_para_pts;
             }
             if(pkt.stream_index == AVMEDIA_TYPE_VIDEO){
                 *last_pice_para_pts = pice_save.end_pts = pkt.dts;
             }
             *last_pice_para_pts = pice_save.end_pts = pkt.dts;
-            av_log(NULL, AV_LOG_ERROR, "OOOOOO dump pts data pkt.pts:=%"PRId64" pice_save.para_start_pts:=%"PRId64" pice_save.end_pts:= %"PRId64" *last_pice_para_pts:=%"PRId64 " <------!!!!!!!!!!!!\n",
-                   pkt.pts , pice_save.para_start_pts, pice_save.end_pts, *last_pice_para_pts);
+            av_log(NULL, AV_LOG_ERROR, "OOOOOO dump pts data pkt.pts:=%"PRId64" pice_save.para_v_start_pts:=%"PRId64" pice_save.end_pts:= %"PRId64" *last_pice_para_pts:=%"PRId64 " <------!!!!!!!!!!!!\n",
+                   pkt.pts , pice_save.para_v_start_pts, pice_save.end_pts, *last_pice_para_pts);
             ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
             if (ret < 0) {
                 fprintf(stderr, "Error muxing packet\n");
@@ -234,6 +236,8 @@ static int demuxing_cut(char *in_filename, char *out_filename)
     int sample_rate = 0;
     float a_persentation_ms = 0.0f;
     float v_persentation_ms = 0;
+    float v_time_base = 0;
+    float a_time_base = 0;
 
 #if 1
 #define ARRAY_SIZE 4
@@ -263,10 +267,10 @@ static int demuxing_cut(char *in_filename, char *out_filename)
     if (open_codec_context(&audio_stream_idx, &audio_dec_ctx, ifmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
         frame_size = audio_dec_ctx->frame_size;
         sample_rate = audio_dec_ctx->sample_rate;
-        a_persentation_ms = (float)frame_size * 1000 / sample_rate;
+        a_time_base = frame_size /(float) sample_rate;
+        av_log(NULL, AV_LOG_ERROR, "get audio frame rate %f  " , a_time_base);
+        a_persentation_ms = a_time_base * 1000 ;
         av_log(NULL, AV_LOG_ERROR, "qc get audio frame_size %d  sample_rate:= %d a_persentation_ms:=%f ! \n", frame_size, sample_rate, a_persentation_ms);
-        
-        
     }
 
     avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename);
@@ -322,14 +326,18 @@ static int demuxing_cut(char *in_filename, char *out_filename)
             av_log(NULL, AV_LOG_ERROR, "avg_frame_rate.den:= %d ", avg_frame_rate.den);
             av_log(NULL, AV_LOG_ERROR, "avg_frame_rate.num:= %d \n", avg_frame_rate.num);
             if(avg_frame_rate.den != 0 && avg_frame_rate.num != 0){
-                v_persentation_ms = avg_frame_rate.num / avg_frame_rate.den;
-                v_persentation_ms = 1000 / v_persentation_ms;
+                    //v_persentation_ms = avg_frame_rate.num / avg_frame_rate.den;
+                    //v_persentation_ms = 1000 / v_persentation_ms;
+                v_time_base = av_q2d(avg_frame_rate);
+                v_persentation_ms = 1000 / v_time_base;
             }
             else if(r_frame_rate.den != 0 && r_frame_rate.num != 0){
-                v_persentation_ms = r_frame_rate.num / r_frame_rate.den;
-                v_persentation_ms = 1000 / v_persentation_ms;
+                    //v_persentation_ms = r_frame_rate.num / r_frame_rate.den;
+                    //v_persentation_ms = 1000 / v_persentation_ms;
+                v_time_base = av_q2d( r_frame_rate);
+                v_persentation_ms = 1000 / v_time_base;
             }else{
-                v_persentation_ms = 40;
+                goto end;
             }
         }
     }
@@ -355,6 +363,7 @@ static int demuxing_cut(char *in_filename, char *out_filename)
         pice_save_file(in_filename, ifmt_ctx, ofmt_ctx, ofmt,
                        time_array[i], time_array[i+1], &last_pice_para_pts,
                        v_persentation_ms, a_persentation_ms,
+                       v_time_base, a_time_base,
                        stream_mapping,
                        stream_mapping_size
                        );
