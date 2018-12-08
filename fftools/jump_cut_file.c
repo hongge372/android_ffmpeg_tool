@@ -17,6 +17,7 @@
 
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, const char *tag)
 {
+    return;
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
 
     printf("%s: pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d\n",
@@ -87,13 +88,15 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
         //double float err, no this type !!!
     double pts_ms_time = 0;
     int64_t last_video_pts = 0;
-
     PICE_SAVE_CNTROL pice_save;
+    char *qc_stream_type;
+    float shift_remove=0;
+    long a_real_start_pts = 0;
+    
         //cut info
     pice_save.start_time = pice_start_time;
     pice_save.end_time = pice_end_time;
     pice_save.last_para_pts = *last_pice_para_pts;
-
         //watch info
     pice_save.chg_rate = 0;
     pice_save.first_write_flg = 0;
@@ -101,17 +104,12 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
     pice_save.para_a_start_pts = 0;
     pice_save.para_write_flg = 0;
     pice_save.end_pts = 0; 
-    
         //checkout if need  !!!
     pice_save.abort_flg = 0;
     pice_save.video_out = 0;
     pice_save.audio_out = 0;
-    char *qc_stream_type;
-
-    float shift_remove=0;
-    
     memset(&pkt, 0, sizeof(AVPacket));
-#if 1
+
     av_log(NULL, AV_LOG_ERROR, "qc cut, seek file for start (%ld) last_pice_para_pts:=%"PRId64" v_persentation_ms:=%f ", pice_save.start_time, *last_pice_para_pts, v_persentation_ms);
     timestamp = (int64_t)pice_save.start_time * 1000;
     if(ifmt_ctx->start_time != AV_NOPTS_VALUE){
@@ -125,8 +123,8 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
         av_log(NULL, AV_LOG_WARNING, "%s: could not seek to position %0.3f\n",
                in_filename, (double)timestamp / AV_TIME_BASE);
     }
-#endif
     av_log(NULL, AV_LOG_ERROR, "pts_ms_time:= %lf pice_save.start_time:=%ld end_time:=%ld \n",  pts_ms_time, pice_save.start_time, pice_save.end_time);
+    
     while (1 && pice_save.abort_flg == 0) {
         AVStream *in_stream, *out_stream;
         ret = av_read_frame(ifmt_ctx, &pkt);
@@ -153,9 +151,10 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
 //        av_log(NULL, AV_LOG_ERROR, "(: ,pkt.dts:=%"PRId64" pkt.pts%"PRId64" , pkt.duration%"PRId64" \n", pkt.dts, pkt.pts, pkt.duration );
         log_packet(ofmt_ctx, &pkt, "**ffmpeg dump out** :");
         pice_save.chg_rate = av_q2d( ofmt_ctx->streams[pkt.stream_index]->time_base);
+//        av_log(NULL, AV_LOG_ERROR, "get --------a-v stream --------- ..  %f  " , pice_save.chg_rate);
             //up to ms
         pts_ms_time = pkt.pts * pice_save.chg_rate  * 1000;
-
+        
         if(pice_save.video_out && pice_save.audio_out){
             pice_save.abort_flg = 1;
             av_packet_unref(&pkt);
@@ -185,26 +184,36 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
             qc_stream_type = "VIDEO";
         }
         
-        av_log(NULL, AV_LOG_ERROR, "OOOO get %s ---> pice_save.abort_flg:=%d  pts_ms_time:= %lf pkt.pts:=%"PRId64" pkt.dts:=%"PRId64" pice_save.end_pts:= %"PRId64" pice_save.last_para_pts:=%"PRId64" \n",
-               qc_stream_type, pice_save.abort_flg,  pts_ms_time, pkt.pts, pkt.dts, pice_save.end_pts, pice_save.last_para_pts);
+//        av_log(NULL, AV_LOG_ERROR, "OOOO get %s ---> pice_save.abort_flg:=%d  pts_ms_time:= %lf pkt.pts:=%"PRId64" pkt.dts:=%"PRId64" pice_save.end_pts:= %"PRId64" pice_save.last_para_pts:=%"PRId64" \n",
+//               qc_stream_type, pice_save.abort_flg,  pts_ms_time, pkt.pts, pkt.dts, pice_save.end_pts, pice_save.last_para_pts);
+        av_log(NULL, AV_LOG_ERROR, "OOOO get %s ---> pts_ms_time:= %lf pkt.pts:=%"PRId64"  pice_save.end_pts:= %"PRId64" pice_save.last_para_pts:=%"PRId64" \n",
+               qc_stream_type,   pts_ms_time, pkt.pts,  pice_save.end_pts, pice_save.last_para_pts);
 
         if(pice_save.abort_flg == 0 &&
            pts_ms_time >= pice_save.start_time &&
            pts_ms_time < pice_save.end_time){
             if(!pice_save.first_write_flg){
-                pice_save.para_v_start_pts = pkt.pts;
+                pice_save.para_v_start_pts = pts_ms_time /(1000 * v_time_base);
+                pice_save.para_a_start_pts = pts_ms_time /(1000 * a_time_base);
                 pice_save.first_write_flg = 1;
-            }            
-            if( pice_save.last_para_pts ){
-                shift_remove = v_persentation_ms /(1000 * pice_save.chg_rate);
-                pkt.dts = pkt.pts = pkt.pts - pice_save.para_v_start_pts + pice_save.last_para_pts + shift_remove;
-            }else{
-                pkt.dts = pkt.pts = pkt.pts - pice_save.para_v_start_pts + pice_save.last_para_pts;
             }
+            if( pice_save.last_para_pts ){
+                if(pkt.stream_index == AVMEDIA_TYPE_VIDEO){
+                    shift_remove = v_persentation_ms /(1000 * pice_save.chg_rate);
+                }
+            }
+            
             if(pkt.stream_index == AVMEDIA_TYPE_VIDEO){
+                pkt.dts = pkt.pts = pkt.pts - pice_save.para_v_start_pts + pice_save.last_para_pts + shift_remove;
                 *last_pice_para_pts = pice_save.end_pts = pkt.dts;
             }
-            *last_pice_para_pts = pice_save.end_pts = pkt.dts;
+            else if(pkt.stream_index == AVMEDIA_TYPE_AUDIO){
+                pts_ms_time = pice_save.last_para_pts * v_time_base  * 1000;
+                a_real_start_pts = pts_ms_time / (pice_save.chg_rate  * 1000);
+                pkt.dts = pkt.pts = pkt.pts - pice_save.para_a_start_pts + a_real_start_pts + shift_remove;
+            }
+            
+            //*last_pice_para_pts = pice_save.end_pts = pkt.dts;
             av_log(NULL, AV_LOG_ERROR, "OOOOOO dump pts data pkt.pts:=%"PRId64" pice_save.para_v_start_pts:=%"PRId64" pice_save.end_pts:= %"PRId64" *last_pice_para_pts:=%"PRId64 " <------!!!!!!!!!!!!\n",
                    pkt.pts , pice_save.para_v_start_pts, pice_save.end_pts, *last_pice_para_pts);
             ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
@@ -242,7 +251,7 @@ static int demuxing_cut(char *in_filename, char *out_filename)
 #if 1
 #define ARRAY_SIZE 4
     long int time_array[ARRAY_SIZE]={
-        0, 300, 20000, 22000,
+        0, 300, 20000, 32000,
     };
 #else
 #define ARRAY_SIZE 2
@@ -254,7 +263,6 @@ static int demuxing_cut(char *in_filename, char *out_filename)
         fprintf(stderr, "Could not open input file '%s'", in_filename);
         goto end;
     }
-
 
     if ((ret = avformat_find_stream_info(ifmt_ctx, 0)) < 0) {
         fprintf(stderr, "Failed to retrieve input stream information");
@@ -316,7 +324,12 @@ static int demuxing_cut(char *in_filename, char *out_filename)
             goto end;
         }
         out_stream->codecpar->codec_tag = 0;
-
+        
+        if(in_codecpar->codec_type == AVMEDIA_TYPE_AUDIO){
+//            a_time_base = av_q2d(out_stream->time_base);
+//            av_log(NULL, AV_LOG_ERROR, "get audio frame rate by audio stream %f  " , a_time_base);
+        }
+        
         if(in_codecpar->codec_type == AVMEDIA_TYPE_VIDEO){
                 //v_persentation_ms = in_stream;
             AVRational r_frame_rate = in_stream->r_frame_rate;
@@ -356,6 +369,14 @@ static int demuxing_cut(char *in_filename, char *out_filename)
     if (ret < 0) {
         fprintf(stderr, "Error occurred when opening output file\n");
         goto end;
+    }
+
+    for(i = 0; i < ofmt_ctx->nb_streams; i++ ){
+        AVStream *out_stream = ofmt_ctx->streams[i];
+        if(out_stream->index == AVMEDIA_TYPE_AUDIO){
+            a_time_base = av_q2d( out_stream->time_base);
+            av_log(NULL, AV_LOG_ERROR, "get audio frame rate in out stream ..  %f  " , a_time_base);
+        }
     }
 
     for(i=0; i < ARRAY_SIZE; i+=2){
