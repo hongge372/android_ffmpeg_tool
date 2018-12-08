@@ -89,7 +89,8 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
     double pts_ms_time = 0;
     PICE_SAVE_CNTROL pice_save;
     char *qc_stream_type;
-    float v_shift_remove=0;
+    int64_t v_shift_remove_pts=0;
+    int64_t a_shift_remove_pts=0;
     int64_t a_real_start_pts = 0;
     float cur_rate=0;
     
@@ -147,7 +148,7 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
         cur_rate = av_q2d( ofmt_ctx->streams[pkt.stream_index]->time_base);
             //up to ms
         pts_ms_time = pkt.pts * cur_rate  * 1000;
-        av_log(NULL, AV_LOG_ERROR, "cur_rate:=%f", cur_rate );
+//        av_log(NULL, AV_LOG_ERROR, "cur_rate:=%f", cur_rate );
         if(pice_save.video_out && pice_save.audio_out){
             pice_save.abort_flg = 1;
             av_packet_unref(&pkt);
@@ -185,22 +186,23 @@ static int pice_save_file(char *in_filename, AVFormatContext *ifmt_ctx, AVFormat
                 if( pice_save.last_para_pts != 0){
                     pice_save.para_v_start_pts = pts_ms_time /(1000 * v_time_base);
                     pice_save.para_a_start_pts = pts_ms_time /(1000 * a_time_base);
-                    v_shift_remove = v_persentation_ms /(1000 * v_time_base);
+                    v_shift_remove_pts =(int64_t) v_persentation_ms /(1000 * v_time_base);
+                    a_shift_remove_pts =(int64_t) a_persentation_ms /(1000 * a_time_base);
                 }
             }
-            av_log(NULL, AV_LOG_ERROR, "%s: pts_ms_time:= %10lf pkt.pts:=%"PRId64" pice_save.last_para_pts:=%"PRId64", v_shift_remove:=%f",
-                   qc_stream_type,   pts_ms_time, pkt.pts, pice_save.last_para_pts, v_shift_remove);
+            av_log(NULL, AV_LOG_ERROR, "%s: pts_ms_time:= %10lf pkt.pts:=%"PRId64" pice_save.last_para_pts:=%"PRId64"",
+                   qc_stream_type,   pts_ms_time, pkt.pts, pice_save.last_para_pts);
             if(pkt.stream_index == AVMEDIA_TYPE_VIDEO){
-                pkt.dts = pkt.pts = pkt.pts - pice_save.para_v_start_pts + pice_save.last_para_pts + v_shift_remove;
+                pkt.dts = pkt.pts = pkt.pts - pice_save.para_v_start_pts + pice_save.last_para_pts + v_shift_remove_pts;
                 *last_pice_para_pts = pkt.dts;
             }
             else if(pkt.stream_index == AVMEDIA_TYPE_AUDIO){
-                pts_ms_time = (pice_save.last_para_pts)* v_time_base  * 1000  + v_shift_remove;
-                a_real_start_pts = pts_ms_time / (a_time_base  * 1000);
-                pkt.dts = pkt.pts = pkt.pts - pice_save.para_a_start_pts + a_real_start_pts;
+                pts_ms_time = (pice_save.last_para_pts)* v_time_base  * 1000  + v_persentation_ms;
+                a_real_start_pts = (pts_ms_time) / (a_time_base  * 1000);
+                pkt.dts = pkt.pts = pkt.pts - pice_save.para_a_start_pts + a_real_start_pts + a_shift_remove_pts;
             }
-            av_log(NULL, AV_LOG_ERROR, "\tfinal: pkt.pts:=%"PRId64" pice_save.para_v_start_pts:=%"PRId64"  a_real_start_pts:=%"PRId64"<-!\n",
-                   pkt.pts , pice_save.para_v_start_pts,  a_real_start_pts);        
+            av_log(NULL, AV_LOG_ERROR, "final:pkt.pts:=%"PRId64" pice_save.para_v_start_pts:=%"PRId64"  a_real_start_pts:=%"PRId64"  v_shift_remove_pts:=%"PRId64"<-!\n",
+                   pkt.pts , pice_save.para_v_start_pts,  a_real_start_pts,  v_shift_remove_pts);        
             ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
             if (ret < 0) {
                 fprintf(stderr, "Error muxing packet\n");
@@ -233,17 +235,32 @@ static int demuxing_cut(char *in_filename, char *out_filename)
     float v_time_base = 0;
     float a_time_base = 0;
 
-#if 1
-#define ARRAY_SIZE 4
-    long int time_array[ARRAY_SIZE]={
-        0, 3000, 20000, 30000,
-    };
-#else
-#define ARRAY_SIZE 2
-    long int time_array[ARRAY_SIZE]={
+    int ARRAY_SIZE = 6;
+    long int **time_array;
+
+    long int time_array_2[2]={
         0, 300
     };
-#endif
+
+    long int time_array_4[4]={
+        0, 100, 20000, 21000
+    };
+    
+    long int time_array_6[6]={
+        0, 3000, 20000, 23000, 50000,53000
+    };
+
+    if(ARRAY_SIZE == 2){
+        time_array = time_array_2;
+    }
+    if(ARRAY_SIZE == 4){
+        time_array = time_array_4;
+    }
+    if(ARRAY_SIZE == 6){
+        time_array = time_array_6;
+    }
+
+    
     if ((ret = avformat_open_input(&ifmt_ctx, in_filename, 0, 0)) < 0) {
         fprintf(stderr, "Could not open input file '%s'", in_filename);
         goto end;
